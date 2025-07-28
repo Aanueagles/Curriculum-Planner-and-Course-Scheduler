@@ -1,0 +1,240 @@
+import json
+import os
+import hashlib
+
+# -------------------------------
+# CLASS DEFINITION
+# -------------------------------
+
+
+class Course:
+    def __init__(self, code, title, credits, prerequisites=None):
+        self.code = code
+        self.title = title
+        self.credits = credits
+        self.prerequisites = prerequisites or []
+
+    def to_dict(self):
+        return {
+            "code": self.code,
+            "title": self.title,
+            "credits": self.credits,
+            "prerequisites": self.prerequisites
+        }
+
+    @staticmethod
+    def from_dict(data):
+        return Course(
+            code=data["code"],
+            title=data["title"],
+            credits=data["credits"],
+            prerequisites=data.get("prerequisites", [])
+        )
+
+# -------------------------------
+# FILE OPERATIONS
+# -------------------------------
+
+
+COURSE_FILE = "courses.json"
+SCHEDULE_DIR = "schedules"
+PROFILE_FILE = "profiles.json"
+
+if not os.path.exists(SCHEDULE_DIR):
+    os.makedirs(SCHEDULE_DIR)
+
+
+def load_courses():
+    if not os.path.exists(COURSE_FILE):
+        return []
+    with open(COURSE_FILE, "r") as f:
+        data = json.load(f)
+        return [Course.from_dict(course) for course in data]
+
+
+def save_courses(courses):
+    with open(COURSE_FILE, "w") as f:
+        json.dump([course.to_dict() for course in courses], f, indent=4)
+
+
+def load_schedule(matric):
+    filepath = os.path.join(SCHEDULE_DIR, f"{matric}_schedule.json")
+    if not os.path.exists(filepath):
+        return []
+    with open(filepath, "r") as f:
+        return json.load(f)
+
+
+def save_schedule(schedule, matric):
+    filepath = os.path.join(SCHEDULE_DIR, f"{matric}_schedule.json")
+    with open(filepath, "w") as f:
+        json.dump(schedule, f, indent=4)
+
+
+def load_profiles():
+    if not os.path.exists(PROFILE_FILE):
+        return {}
+    with open(PROFILE_FILE, "r") as f:
+        return json.load(f)
+
+
+def save_profiles(profiles):
+    with open(PROFILE_FILE, "w") as f:
+        json.dump(profiles, f, indent=4)
+
+# -------------------------------
+# PASSWORD HASHING
+# -------------------------------
+
+
+def hash_password(password):
+    return hashlib.sha256(password.encode()).hexdigest()
+
+# -------------------------------
+# MENU FUNCTIONS
+# -------------------------------
+
+
+def show_menu():
+    print("\n📚 Curriculum Planner and Course Scheduler")
+    print("1. View all courses")
+    print("2. Add a new course")
+    print("3. Plan your schedule")
+    print("4. Track credit progress")
+    print("5. Exit")
+
+# -------------------------------
+# MAIN FUNCTION
+# -------------------------------
+
+
+def authenticate():
+    profiles = load_profiles()
+    matric = input("Enter your matric number: ").strip()
+
+    if matric not in profiles:
+        print("🆕 New user detected.")
+        name = input("Enter your full name: ").strip()
+        password = input("Create a password: ").strip()
+        profiles[matric] = {
+            "name": name,
+            "password": hash_password(password)
+        }
+        save_profiles(profiles)
+        print(f"✅ Profile created for {name} ({matric})")
+    else:
+        password = input("Enter your password: ").strip()
+        if profiles[matric]["password"] != hash_password(password):
+            print("❌ Incorrect password.")
+            return authenticate()
+        print(f"👋 Welcome back, {profiles[matric]['name']} ({matric})")
+
+    return matric
+
+
+def main():
+    matric = authenticate()
+    courses = load_courses()
+    while True:
+        show_menu()
+        choice = input("Enter your choice (1-5): ")
+
+        if choice == '1':
+            if not courses:
+                print(">> No courses available yet.")
+            else:
+                print("\n📚 Available Courses:")
+                for i, course in enumerate(courses, 1):
+                    prereq_str = ", ".join(
+                        course.prerequisites) if course.prerequisites else "None"
+                    print(
+                        f"{i}. {course.code} - {course.title} | Credits: {course.credits} | Prerequisites: {prereq_str}")
+
+        elif choice == '2':
+            code = input("Enter course code (e.g. CSC101): ")
+            title = input("Enter course title: ")
+            try:
+                credits = int(input("Enter credit hours: "))
+            except ValueError:
+                print("Invalid input. Credit hours must be a number.")
+                continue
+            prereqs = input(
+                "Enter prerequisites (comma-separated course codes, or leave blank): ")
+            prereq_list = [p.strip()
+                           for p in prereqs.split(",")] if prereqs else []
+            new_course = Course(code, title, credits, prereq_list)
+            courses.append(new_course)
+            save_courses(courses)
+            print(f">> Course '{title}' added successfully!")
+
+        elif choice == '3':
+            if not courses:
+                print(">> No courses available yet. Please add courses first.")
+                continue
+
+            schedule = load_schedule(matric)
+            print("\n📅 Plan Your Semester")
+            print("Available Courses:")
+            for i, course in enumerate(courses, 1):
+                print(f"{i}. {course.code} - {course.title}")
+
+            selections = input(
+                "Enter course numbers to add (comma-separated, e.g. 1,3,5): ")
+            try:
+                selected_indexes = [
+                    int(i.strip()) - 1 for i in selections.split(",")]
+            except ValueError:
+                print("Invalid input. Use only numbers.")
+                continue
+
+            added_courses = []
+            for index in selected_indexes:
+                if 0 <= index < len(courses):
+                    course = courses[index]
+                    missing_prereqs = [p for p in course.prerequisites if p not in [
+                        c['code'] for c in schedule]]
+                    if missing_prereqs:
+                        print(
+                            f"⚠️ You cannot take {course.code} - {course.title} without prerequisites: {', '.join(missing_prereqs)}")
+                    else:
+                        added_courses.append(course.to_dict())
+                else:
+                    print(f"Invalid selection: {index + 1}")
+
+            if added_courses:
+                schedule.extend(added_courses)
+                save_schedule(schedule, matric)
+                print("✅ Courses added to your schedule:")
+                for c in added_courses:
+                    print(f" - {c['code']} - {c['title']}")
+            else:
+                print("❌ No valid courses were added to the schedule.")
+
+        elif choice == '4':
+            schedule = load_schedule(matric)
+            if not schedule:
+                print(">> Your schedule is currently empty.")
+                continue
+            total_credits = sum(course['credits'] for course in schedule)
+            print("\n🎓 Credit Progress")
+            print(f"Total Credits Taken: {total_credits}")
+            target_credits = 120
+            print(f"Target to Graduate: {target_credits} credits")
+            print(f"Remaining: {target_credits - total_credits} credits")
+            if total_credits < 15:
+                print("⚠️ You are below a full-time semester load (15 credits minimum).")
+            elif total_credits >= target_credits:
+                print("✅ You have reached or exceeded the target credit requirement!")
+
+        elif choice == '5':
+            print("👋 Goodbye!")
+            break
+        else:
+            print("Invalid input. Please enter a number from 1 to 5.")
+
+
+# -------------------------------
+# ENTRY POINT
+# -------------------------------
+if __name__ == "__main__":
+    main()
